@@ -4,13 +4,17 @@ import datetime
 import re
 import sys
 from dateutil.parser import parse as parse_date
-import ib_insync
+from core import *
 
 # preference parameters
 light = 2
 regular = 3
 lotto = 2
 allow_fill_pct_above_message = 0.15
+
+# figure out what account list to use, if any is specified
+accountlist = config[f"DEFAULT"]['accounts']
+accounts = accountlist.split(",")
 
 if len(sys.argv) >= 2 and sys.argv[1] == "-h":
     print("Usage: " + sys.argv[0] + " [parameters]")
@@ -104,10 +108,27 @@ while True:
         #else:
         #    print("Unknown word: " + word)
 
+    if symbol is None:
+        print("No symbol found")
+        continue
+    if strike is None:
+        print("No strike found")
+        continue
+    if put_call is None:
+        print("No put_call found")
+        continue
+
+    print(f"symbol={symbol} strike={strike} put_call={put_call} expiry={expiry} expected_fill={expected_fill} max_fill={max_fill} contracts={contracts}")
+
+    for account in accounts:
+        if expected_fill is None:
+            print("No expected_fill found")
+            continue
+
+
     max_fill = None
     if expected_fill is not None:
         max_fill = round(expected_fill * (1 + allow_fill_pct_above_message), 1)
 
-    print(f"symbol={symbol} strike={strike} put_call={put_call} expiry={expiry} expected_fill={expected_fill} max_fill={max_fill} contracts={contracts}")
 
     
