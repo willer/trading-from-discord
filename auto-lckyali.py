@@ -3,14 +3,15 @@
 import datetime
 import re
 import sys
+import configparser
 from dateutil.parser import parse as parse_date
-from core import *
 
-# preference parameters
-light = 2
-regular = 3
-lotto = 2
-allow_fill_pct_above_message = 0.15
+from broker_root import broker_root
+from broker_ibkr import broker_ibkr
+from broker_alpaca import broker_alpaca
+
+config = configparser.ConfigParser()
+config.read('config.ini')
 
 # figure out what account list to use, if any is specified
 accountlist = config[f"DEFAULT"]['accounts']
@@ -25,13 +26,6 @@ if len(sys.argv) >= 2 and sys.argv[1] == "-h":
     print("    allow_fill_above_message=0.5")
     exit()
 
-
-# interpreted buy parameters
-symbol = None
-strike = None
-expected_fill = None
-contracts = regular
-put_call = None
 
 for i in range(2, len(sys.argv)):
     param = sys.argv[i]
@@ -72,58 +66,109 @@ while True:
     message = input("Enter message: ")
     if message == "":
         break
-    expiry = datetime.date.today()
+    expiry = datetime.date.today() + datetime.timedelta(days=1)
 
-    words = message.split()
-    for i in range(0, len(words)):
-        word = words[i]
-        if word.lower() == "light":
-            contracts = light
-        elif word.lower() == "regular":
-            contracts = regular
-        elif word.lower() in ["calls","call"]:
-            put_call = "C"
-        elif word.lower() in ["puts","put"]:
-            put_call = "P"
-        elif word.lower() == "lotto":
-            contracts = lotto
-        elif word in ["ES","NQ","SPX","SPY","QQQ","MSFT","AAPL","AMD","TSLA","AMZN","GOOG","GOOGL","FB","NVDA","NFLX","INTC","CSCO","ADBE","BABA","BIDU","PYPL","MA"]:
-            symbol = word
-        elif re.match("^[0-9]+C$", word):
-            put_call = "C"
-            strike = float(word[:-1])
-        elif re.match("^[0-9]+P$",word):
-            put_call = "P"
-            strike = float(word[:-1])
-        elif re.match("^[0-9]+$",word) and strike is None:
-            strike = float(word)
-        elif re.match("^[0-9.]+$",word):
-            expected_fill = float(word)
-        elif re.match("^\\$[0-9.]+$",word):
-            expected_fill = float(word[1:])
-        elif re.match("^[0-9]+/[A-Z][a-zA-Z]+$",word):
-            expiry = parse_flexible_date(word)
-        elif re.match("^[A-Z][a-zA-Z]+/[0-9]+$",word):
-            expiry = parse_flexible_date(word)
-        #else:
-        #    print("Unknown word: " + word)
-
-    if symbol is None:
-        print("No symbol found")
-        continue
-    if strike is None:
-        print("No strike found")
-        continue
-    if put_call is None:
-        print("No put_call found")
-        continue
-
-    print(f"symbol={symbol} strike={strike} put_call={put_call} expiry={expiry} expected_fill={expected_fill} max_fill={max_fill} contracts={contracts}")
+    # interpreted buy parameters
+    symbol = None
+    strike = None
+    expected_fill = None
+    put_call = None
 
     for account in accounts:
-        if expected_fill is None:
-            print("No expected_fill found")
+
+        aconfig = config[account]
+        # preference parameters
+        light = 2
+        if 'light' in aconfig:
+            light = int(aconfig['light'])
+
+        regular = 3
+        if 'regular' in aconfig:
+            regular = int(aconfig['regular'])
+
+        lotto = 2
+        if 'lotto' in aconfig:
+            lotto = int(aconfig['lotto'])
+
+        allow_fill_pct_above_message = 0.15
+        if 'allow_fill_pct_above_message' in aconfig:
+            allow_fill_pct_above_message = float(aconfig['allow_fill_pct_above_message'])
+
+        use_options = 'yes'
+        if 'use_options' in aconfig:
+            use_options = aconfig['use_options']
+        if use_options != 'yes':
             continue
+
+        contracts = regular
+
+        words = message.split()
+        for i in range(0, len(words)):
+            word = words[i].lower()
+            if word.lower() == "light":
+                contracts = light
+            elif word.lower() == "regular":
+                contracts = regular
+            elif word.lower() in ["calls","call"]:
+                put_call = "C"
+            elif word.lower() in ["puts","put"]:
+                put_call = "P"
+            elif word.lower() == "lotto":
+                contracts = lotto
+            elif word in ["es","nq","spx","spxw","spy","qqq","msft","aapl","amd","tsla","amzn","goog","googl","fb","nvda","nflx","intc","csco","adbe","baba","bidu","pypl","ma"]:
+                symbol = word.upper()
+            elif re.match("^[0-9]+c$", word):
+                put_call = "C"
+                strike = float(word[:-1])
+            elif re.match("^[0-9]+p$",word):
+                put_call = "P"
+                strike = float(word[:-1])
+            elif re.match("^[0-9]+$",word) and strike is None:
+                strike = float(word)
+            elif re.match("^[0-9.]+$",word):
+                expected_fill = float(word)
+            elif re.match("^\\$[0-9.]+$",word):
+                expected_fill = float(word[1:])
+            elif re.match("^[0-9]+/[a-z][a-z]+$",word):
+                expiry = parse_flexible_date(word)
+            elif re.match("^[a-z][a-z]+/[0-9]+$",word):
+                expiry = parse_flexible_date(word)
+            #else:
+            #    print("Unknown word: " + word)
+
+        if symbol is None:
+            print("No symbol found")
+            break
+        if strike is None:
+            print("No strike found")
+            break
+        if put_call is None:
+            print("No put_call found")
+            break
+        print(f"ACCOUNT: {account}")
+
+        if contracts == 0:
+            print("No order")
+            continue
+
+        driver: broker_root = None
+        if aconfig['driver'] == 'ibkr':
+            driver = broker_ibkr('live', account)
+        elif aconfig['driver'] == 'alpaca':
+            driver = broker_alpaca('live', account)
+        else:
+            raise Exception("Unknown driver: " + aconfig['driver'])
+
+        if expected_fill is None:
+            # example: get_price_opt('SPY', datetime.date.today, 280, 'P')
+            expected_fill = driver.get_price_opt(symbol, expiry, strike, put_call)
+
+        max_fill = driver.x_round(expected_fill * (1 + allow_fill_pct_above_message), 10)
+
+        print(f"symbol={symbol} strike={strike} put_call={put_call} expiry={expiry} expected_fill={expected_fill} contracts={contracts}")
+
+        # example: buy_opt('SPY', datetime.date.today, 280, 'P', 1, 1.35)
+        driver.buy_opt(symbol, expiry, strike, put_call, contracts, max_fill)
 
 
     max_fill = None

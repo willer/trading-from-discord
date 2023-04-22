@@ -223,18 +223,13 @@ class broker_ibkr(broker_root):
         print(f"  get_price({symbol}) -> {price}")
         return price
 
-    # example: get_price_opt('SPY', datetime.date.today, 280, 'P', '20191016')
+    # example: get_price_opt('SPY', datetime.date.today, 280, 'P')
     def get_price_opt(self, symbol, expiry, strike, put_call):
         self.load_conn()
 
         datestr = expiry.strftime("%Y%m%d")
-        contract = Option(symbol, expiry, strike, put_call, "SMART")
-        ticker = self.conn.reqMktData(contract)
-
-        #order = MarketOrder("Buy",2)
-        #trade = self.conn.placeOrder(contract,order)
-        #stock = self.get_stock(symbol)
-
+        contract = Option(symbol, datestr, strike, put_call, exchange="SMART", currency="USD", tradingClass='SPX')
+        [ticker] = self.conn.reqTickers(contract)
 
         if math.isnan(ticker.last):
             if math.isnan(ticker.close):
@@ -327,6 +322,42 @@ class broker_ibkr(broker_root):
                 self.handle_ex(msg)
 
             print("order filled")
+
+    # example: buy_opt('SPY', datetime.date.today, 280, 'P', 1, 1.35)
+    def buy_opt(self, symbol, expiry, strike, put_call, amount, max_price):
+        print(f"buy_opt({self.account},{symbol},{expiry},{strike},{put_call},{amount}, {max_price})")
+        self.load_conn()
+
+        datestr = expiry.strftime("%Y%m%d")
+        contract = Option(symbol, datestr, strike, put_call, exchange="CBOE", currency="USD")
+
+        order = LimitOrder('BUY', amount, max_price)
+
+        order.outsideRth = True
+        order.account = self.account
+
+        print("  placing order: ", order)
+        trade = self.conn.placeOrder(contract, order)
+        print("    trade: ", trade)
+
+        # wait for the order to be filled, up to 30s
+        maxloops = 15
+        print("    waiting for trade1: ", trade)
+        while trade.orderStatus.status not in ['Filled','Cancelled','ApiCancelled'] and maxloops > 0:
+            self.conn.sleep(1)
+            print("    waiting for trade2: ", trade)
+            maxloops -= 1
+
+        self.conn.sleep(1)
+
+        # throw exception on order failure
+        if trade.orderStatus.status not in ['Filled']:
+            msg = f"ORDER FAILED in status {trade.orderStatus.status}: buy_opt({self.account},{symbol},{expiry},{strike},{put_call},{amount}, {max_price}) -> {trade.orderStatus}"
+            print(msg)
+            self.handle_ex(msg)
+
+        print("order filled")
+
 
     def download_data(self, symbol, end, duration, barlength, cachedata=False):
         print(f"download_data({symbol},{end},{duration},{barlength})")
